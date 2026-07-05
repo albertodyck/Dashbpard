@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<!-- Esta línea es vital para que se adapte bien a la pantalla de tu teléfono -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPQuery Dashboard Enterprise</title>
+
+<style>
+:root {
+    --bg: #f3f4f6;
+    --card: #ffffff;
+    --text: #1f2937;
+    --accent: #2563eb;
+    --accent-dark: #1e4fc7;
+    --danger: #dc2626;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #111827;
+        --card: #1f2937;
+        --text: #e5e7eb;
+        --accent: #3b82f6;
+        --accent-dark: #1d4ed8;
+    }
+}
+body {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+}
+header {
+    background: var(--accent);
+    color: white;
+    padding: 18px 24px;
+    font-size: 22px;
+    font-weight: 600;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+}
+header span {
+    font-size: 14px;
+    font-weight: 400;
+    opacity: 0.85;
+}
+.container {
+    max-width: 1200px;
+    margin: auto;
+    padding: 15px;
+}
+.card {
+    background: var(--card);
+    padding: 18px 20px;
+    border-radius: 12px;
+    margin-top: 18px;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.25);
+    animation: fadeIn 0.3s ease;
+}
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+/* Optimización de inputs y botones para móviles */
+input {
+    padding: 12px;
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: 6px;
+    border: 1px solid #9ca3af;
+    font-size: 16px;
+    margin-bottom: 10px;
+    background: var(--card);
+    color: var(--text);
+}
+button {
+    padding: 12px 16px;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
+    width: 100%;
+    margin-bottom: 8px;
+    box-sizing: border-box;
+}
+button:hover {
+    background: var(--accent-dark);
+}
+.btn-secondary {
+    background: #6b7280;
+}
+.btn-secondary:hover {
+    background: #4b5563;
+}
+.btn-danger {
+    background: var(--danger);
+}
+.btn-danger:hover {
+    background: #b91c1c;
+}
+.section-title {
+    font-size: 18px;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+pre {
+    background: #000000aa;
+    color: #e5e7eb;
+    padding: 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 13px;
+}
+.copy-btn {
+    margin-top: 8px;
+}
+.badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    margin-right: 6px;
+}
+.badge-low { background: #16a34a33; color: #16a34a; }
+.badge-med { background: #f9731633; color: #f97316; }
+.badge-high { background: #dc262633; color: #dc2626; }
+.badge-info { background: #2563eb33; color: #2563eb; }
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+}
+#map {
+    width: 100%;
+    height: 260px;
+    border-radius: 10px;
+    margin-top: 8px;
+    border: none;
+}
+.small {
+    font-size: 13px;
+    opacity: 0.8;
+}
+</style>
+</head>
+<body>
+
+<header>
+    IPQuery Dashboard Enterprise
+    <br><span>Local + servicios externos (ipquery.io + WHOIS/RDAP con bypass CORS)</span>
+</header>
+
+<div class="container">
+
+    <div class="card">
+        <h2>Consulta de IP</h2>
+        <p class="small">
+            Introduce una IPv4 o IPv6. Se consultan ipquery.io y un servicio WHOIS/RDAP gratuito a través de proxy.
+        </p>
+
+        <input id="ipInput" type="text" placeholder="Ej. 8.8.8.8 o 2001:4860:4860::8888">
+        <button onclick="consultar()">Consultar</button>
+        <button class="btn-secondary" onclick="borrar()">Borrar</button>
+    </div>
+
+    <div id="resultado"></div>
+
+</div>
+
+<script>
+async function consultar() {
+    const ip = document.getElementById("ipInput").value.trim();
+    if (!ip) {
+        alert("Escribe una IP");
+        return;
+    }
+
+    const resDiv = document.getElementById("resultado");
+    resDiv.innerHTML = `<div class="card"><p>Consultando servicios...</p></div>`;
+
+    try {
+        // ipquery.io via proxy AllOrigins para evitar bloqueos de CORS
+        const ipqUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent("https://api.ipquery.io/" + ip + "?format=json")}`;
+        const ipqResp = await fetch(ipqUrl);
+        const ipqData = await ipqResp.json();
+
+        // WHOIS/RDAP gratuito via proxy
+        const whoUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent("https://who-dat.as93.net/" + ip)}`;
+        let whoData = null;
+        try {
+            const whoResp = await fetch(whoUrl);
+            whoData = await whoResp.json();
+        } catch (e) {
+            whoData = { error: "No se pudo consultar WHOIS/RDAP externo" };
+        }
+
+        renderDashboard(ipqData, whoData);
+    } catch (err) {
+        resDiv.innerHTML = `<div class="card"><p style="color:red;">Error al consultar servicios: ${err}</p></div>`;
+    }
+}
+
+function borrar() {
+    document.getElementById("ipInput").value = "";
+    document.getElementById("resultado").innerHTML = "";
+}
+
+function copiar(texto) {
+    navigator.clipboard.writeText(texto)
+        .then(() => alert("Información copiada al portapapeles"))
+        .catch(() => alert("No se pudo copiar al portapapeles o requiere permisos"));
+}
+
+function riesgoBadge(score) {
+    if (score === undefined || score === null) return "";
+    let cls = "badge-low";
+    let label = "Riesgo bajo";
+    if (score >= 70) { cls = "badge-high"; label = "Riesgo alto"; }
+    else if (score >= 40) { cls = "badge-med"; label = "Riesgo medio"; }
+    return `<span class="badge ${cls}">${label} (score: ${score})</span>`;
+}
+
+function buildDecision(ipq, who) {
+    let score = ipq?.risk?.score || ipq?.risk?.threat_score || 0;
+    let isTor = ipq?.risk?.is_tor || false;
+    let isProxy = ipq?.risk?.is_proxy || false;
+    let isDatacenter = ipq?.isp?.type === "hosting" || ipq?.network?.type === "datacenter";
+
+    let decision = "";
+    let actions = [];
+
+    if (score >= 70 || isTor) {
+        decision = "Bloquear y monitorear";
+        actions.push("Agregar regla de bloqueo en WAF / firewall.");
+        actions.push("Registrar incidente en SOC / mesa de ayuda.");
+        actions.push("Revisar intentos de autenticación asociados.");
+    } else if (score >= 40 || isProxy || isDatacenter) {
+        decision = "Permitir con monitoreo reforzado";
+        actions.push("Aplicar reglas WAF más estrictas (rate limiting).");
+        actions.push("Habilitar logging detallado en servicios expuestos.");
+    } else {
+        decision = "Permitir con monitoreo estándar";
+        actions.push("Mantener registro de actividad en logs centrales.");
+    }
+
+    let infra = [];
+    if (isDatacenter) infra.push("Posible IP de centro de datos / hosting.");
+    if (ipq?.isp?.name) infra.push(`ISP: ${ipq.isp.name}`);
+    if (ipq?.location?.country) infra.push(`País: ${ipq.location.country}`);
+
+    return { decision, actions, infra, score };
+}
+
+function renderDashboard(ipq, who) {
+    const resDiv = document.getElementById("resultado");
+    let html = "";
+
+    const decision = buildDecision(ipq, who);
+
+    // Panel de decisión
+    html += `
+        <div class="card">
+            <div class="section-title">Motor de decisión de ciberseguridad</div>
+            <p>${riesgoBadge(decision.score)}</p>
+            <p><strong>Decisión sugerida:</strong> ${decision.decision}</p>
+            <ul class="small">
+                ${decision.actions.map(a => `<li>${a}</li>`).join("")}
+            </ul>
+            <p class="small"><strong>Contexto:</strong></p>
+            <ul class="small">
+                ${decision.infra.map(a => `<li>${a}</li>`).join("")}
+            </ul>
+        </div>
+    `;
+
+    // Grid técnico
+    html += `<div class="grid">`;
+
+    html += `
+        <div class="card">
+            <div class="section-title">Información general</div>
+            <pre>${JSON.stringify({ ip: ipq.ip, version: ipq.version, is_bogon: ipq.is_bogon }, null, 2)}</pre>
+        </div>
+    `;
+
+    if (ipq.isp) {
+        html += `
+            <div class="card">
+                <div class="section-title">ISP / Proveedor</div>
+                <pre>${JSON.stringify(ipq.isp, null, 2)}</pre>
+            </div>
+        `;
+    }
+
+    if (ipq.location) {
+        html += `
+            <div class="card">
+                <div class="section-title">Ubicación</div>
+                <pre>${JSON.stringify(ipq.location, null, 2)}</pre>
+            </div>
+        `;
+    }
+
+    if (ipq.risk) {
+        html += `
+            <div class="card">
+                <div class="section-title">Riesgo extendido</div>
+                <pre>${JSON.stringify(ipq.risk, null, 2)}</pre>
+            </div>
+        `;
+    }
+
+    html += `</div>`; // fin grid
+
+    if (who) {
+        html += `
+            <div class="card">
+                <div class="section-title">WHOIS / RDAP</div>
+                <pre>${JSON.stringify(who, null, 2)}</pre>
+            </div>
+        `;
+    }
+
+    if (ipq.location && ipq.location.latitude && ipq.location.longitude) {
+        html += `
+            <div class="card">
+                <div class="section-title">Mapa</div>
+                <iframe id="map" src="https://maps.google.com/maps?q=${ipq.location.latitude},${ipq.location.longitude}&z=8&output=embed"></iframe>
+            </div>
+        `;
+    }
+
+    resDiv.innerHTML = html;
+}
+</script>
+
+</body>
+</html>
