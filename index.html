@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPQuery Dashboard Enterprise</title>
+
+<style>
+:root {
+    --bg: #f3f4f6;
+    --card: #ffffff;
+    --text: #1f2937;
+    --accent: #2563eb;
+    --accent-dark: #1e4fc7;
+    --danger: #dc2626;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #111827;
+        --card: #1f2937;
+        --text: #e5e7eb;
+        --accent: #3b82f6;
+        --accent-dark: #1d4ed8;
+    }
+}
+body {
+    margin: 0;
+    font-family: system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+}
+header {
+    background: var(--accent);
+    color: white;
+    padding: 18px 24px;
+    font-size: 22px;
+    font-weight: 600;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+}
+header span {
+    font-size: 14px;
+    opacity: 0.85;
+}
+.container {
+    max-width: 1200px;
+    margin: auto;
+    padding: 15px;
+}
+.card {
+    background: var(--card);
+    padding: 18px 20px;
+    border-radius: 12px;
+    margin-top: 18px;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.25);
+}
+input {
+    padding: 12px;
+    width: 100%;
+    border-radius: 6px;
+    border: 1px solid #9ca3af;
+    font-size: 16px;
+    margin-bottom: 10px;
+}
+button {
+    padding: 12px 16px;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
+    width: 100%;
+    margin-bottom: 8px;
+}
+button:hover {
+    background: var(--accent-dark);
+}
+.btn-secondary {
+    background: #6b7280;
+}
+.btn-secondary:hover {
+    background: #4b5563;
+}
+.section-title {
+    font-size: 18px;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+pre {
+    background: #000000aa;
+    color: #e5e7eb;
+    padding: 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 13px;
+}
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+}
+#map {
+    width: 100%;
+    height: 260px;
+    border-radius: 10px;
+    border: none;
+}
+</style>
+</head>
+<body>
+
+<!-- Detecta content:// -->
+<script>
+if (location.href.startsWith("content://")) {
+    document.body.innerHTML = `
+        <div style="padding:20px;font-family:sans-serif;">
+            <h2>⚠ Restricción de Android</h2>
+            <p>Este archivo fue abierto desde <strong>content://</strong>, lo cual bloquea todas las conexiones externas.</p>
+            <p>Para que funcione:</p>
+            <ul>
+                <li>Abrir desde <strong>file://</strong> en Chrome o Firefox</li>
+                <li>O usar un servidor local (Termux → python -m http.server)</li>
+                <li>O subirlo a GitHub Pages</li>
+            </ul>
+        </div>
+    `;
+}
+</script>
+
+<header>
+    IPQuery Dashboard Enterprise
+    <br><span>Local + servicios externos (ipquery.io + WHOIS/RDAP con bypass CORS)</span>
+</header>
+
+<div class="container">
+
+    <div class="card">
+        <h2>Consulta de IP</h2>
+        <p class="small">
+            Introduce una IPv4 o IPv6. Se consultan ipquery.io y WHOIS/RDAP a través de proxy sin CORS.
+        </p>
+
+        <input id="ipInput" type="text" placeholder="Ej. 8.8.8.8 o 2001:4860:4860::8888">
+        <button onclick="consultar()">Consultar</button>
+        <button class="btn-secondary" onclick="borrar()">Borrar</button>
+    </div>
+
+    <div id="resultado"></div>
+
+</div>
+
+<script>
+async function consultar() {
+    const ip = document.getElementById("ipInput").value.trim();
+    if (!ip) {
+        alert("Escribe una IP");
+        return;
+    }
+
+    const resDiv = document.getElementById("resultado");
+    resDiv.innerHTML = `<div class="card"><p>Consultando servicios...</p></div>`;
+
+    try {
+        // ipquery.io via corsproxy.io
+        const ipqUrl = `https://corsproxy.io/?https://api.ipquery.io/${ip}?format=json`;
+        const ipqResp = await fetch(ipqUrl);
+        const ipqData = await ipqResp.json();
+
+        // WHOIS/RDAP via corsproxy.io
+        const whoUrl = `https://corsproxy.io/?https://who-dat.as93.net/${ip}`;
+        let whoData = null;
+        try {
+            const whoResp = await fetch(whoUrl);
+            whoData = await whoResp.json();
+        } catch (e) {
+            whoData = { error: "No se pudo consultar WHOIS/RDAP externo" };
+        }
+
+        renderDashboard(ipqData, whoData);
+    } catch (err) {
+        resDiv.innerHTML = `<div class="card"><p style="color:red;">Error al consultar servicios: ${err}</p></div>`;
+    }
+}
+
+function borrar() {
+    document.getElementById("ipInput").value = "";
+    document.getElementById("resultado").innerHTML = "";
+}
+
+function riesgoBadge(score) {
+    if (score === undefined || score === null) return "";
+    let cls = "badge-low";
+    let label = "Riesgo bajo";
+    if (score >= 70) { cls = "badge-high"; label = "Riesgo alto"; }
+    else if (score >= 40) { cls = "badge-med"; label = "Riesgo medio"; }
+    return `<span class="badge ${cls}">${label} (score: ${score})</span>`;
+}
+
+function buildDecision(ipq, who) {
+    let score = ipq?.risk?.score || ipq?.risk?.threat_score || 0;
+    let isTor = ipq?.risk?.is_tor || false;
+    let isProxy = ipq?.risk?.is_proxy || false;
+    let isDatacenter = ipq?.isp?.type === "hosting" || ipq?.network?.type === "datacenter";
+
+    let decision = "";
+    let actions = [];
+
+    if (score >= 70 || isTor) {
+        decision = "Bloquear y monitorear";
+        actions.push("Agregar regla de bloqueo en WAF / firewall.");
+        actions.push("Registrar incidente en SOC.");
+    } else if (score >= 40 || isProxy || isDatacenter) {
+        decision = "Permitir con monitoreo reforzado";
+        actions.push("Aplicar reglas WAF más estrictas.");
+        actions.push("Habilitar logging detallado.");
+    } else {
+        decision = "Permitir con monitoreo estándar";
+        actions.push("Mantener registro de actividad.");
+    }
+
+    let infra = [];
+    if (isDatacenter) infra.push("Posible IP de centro de datos / hosting.");
+    if (ipq?.isp?.name) infra.push(`ISP: ${ipq.isp.name}`);
+    if (ipq?.location?.country) infra.push(`País: ${ipq.location.country}`);
+
+    return { decision, actions, infra, score };
+}
+
+function renderDashboard(ipq, who) {
+    const resDiv = document.getElementById("resultado");
+    let html = "";
+
+    const decision = buildDecision(ipq, who);
+
+    html += `
+        <div class="card">
+            <div class="section-title">Motor de decisión de ciberseguridad</div>
+            <p>${riesgoBadge(decision.score)}</p>
+            <p><strong>Decisión sugerida:</strong> ${decision.decision}</p>
+            <ul class="small">
+                ${decision.actions.map(a => `<li>${a}</li>`).join("")}
+            </ul>
+            <p class="small"><strong>Contexto:</strong></p>
+            <ul class="small">
+                ${decision.infra.map(a => `<li>${a}</li>`).join("")}
+            </ul>
+        </div>
+    `;
+
+    html += `<div class="grid">`;
+
+    html += `
+        <div class="card">
+            <div class="section-title">Información general</div>
+            <pre>${JSON.stringify({
+                ip: ipq.ip,
+                version: ipq.version,
+                is_bogon: ipq.is_bogon
+            }, null, 2)}</pre>
+        </div>
+    `;
+
+    if (ipq.isp) {
+        html += `
+            <div class="card">
+                <div class="section-title">ISP / Proveedor</div>
+                <pre>${JSON.stringify(ipq.isp, null, 2)}</pre>
+            </div>
+        `;
+    }
+
+    if (ipq.location) {
+        html += `
+            <div class="card">
+                <div class="section-title">Ubicación</div>
+                <pre>${JSON.stringify(ipq.location, null, 2)}</pre>
+            </div>
+        `;
+    }
+
+    if (ipq.risk) {
+        html += `
+            <div class="card">
+                <div class="section-title">Riesgo extendido</div>
+                <pre>${JSON.stringify(ipq.risk, null, 2)}</pre>
+            </div>
+        `;
+    }
+
+    html += `</div>`;
+
+    if (who) {
+        html += `
+            <div class="card">
+                <div class="section-title">WHOIS / RDAP</div>
+                <pre>${JSON.stringify(who, null, 2)}</pre>
+            </div>
+        `;
+    }
+
+    if (ipq.location && ipq.location.latitude && ipq.location.longitude) {
+        html += `
+            <div class="card">
+                <div class="section-title">Mapa</div>
+                <iframe id="map" src="https://maps.google.com/maps?q=${ipq.location.latitude},${ipq.location.longitude}&z=8&output=embed"></iframe>
+            </div>
+        `;
+    }
+
+    resDiv.innerHTML = html;
+}
+</script>
+
+</body>
+</html>
